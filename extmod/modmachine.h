@@ -213,6 +213,7 @@ extern const mp_obj_type_t machine_signal_type;
 extern const mp_obj_type_t machine_spi_type;
 extern const mp_obj_type_t machine_timer_type;
 extern const mp_obj_type_t machine_uart_type;
+extern const mp_obj_type_t machine_usbd_type;
 extern const mp_obj_type_t machine_wdt_type;
 
 #if MICROPY_PY_MACHINE_SOFTI2C
