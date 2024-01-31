@@ -228,7 +228,10 @@ STATIC mp_obj_t usbd_reenumerate(mp_obj_t self) {
     // Need to wait until tud_task() exits and do it then. See mp_usbd_task() for
     // implementation.
 
-    usbd->reenumerate = true;
+    // Also, we only have to do this if USB is connected (i.e. at least one SETUP packet
+    // has been received.)
+
+    usbd->reenumerate = tud_connected();
 
     // Schedule a mp_usbd_task callback in case there isn't one pending
     mp_usbd_schedule_task();
@@ -550,14 +553,16 @@ usbd_class_driver_t const *usbd_app_driver_get_cb(uint8_t *driver_count) {
 
 STATIC bool in_task; // Flags if mp_usbd_task() is processing already
 
+STATIC void mp_usbd_task_inner(void);
+
 void mp_usbd_task_callback(mp_sched_node_t *node) {
     // If in_task is set, it means something else has already manually called
     // mp_usbd_task() (most likely: C-based USB-CDC serial port). Now the MP
     // scheduler is running inside there and triggering this callback. It's OK
     // to skip, the already-running TinyUSB task loop will process all pending
     // events before it returns.
-    if (!in_task) {
-        mp_usbd_task();
+    if (tud_inited() && !in_task) {
+        mp_usbd_task_inner();
     }
 }
 
@@ -568,7 +573,13 @@ void mp_usbd_task(void) {
         // write from a C-based USB-CDC serial port.)
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("TinyUSB callback can't recurse"));
     }
+
+    mp_usbd_task_inner();
+}
+
+STATIC void mp_usbd_task_inner(void) {
     in_task = true;
+
     tud_task_ext(0, false);
 
     mp_obj_usbd_t *usbd = MP_OBJ_TO_PTR(MP_STATE_VM(usbd));
