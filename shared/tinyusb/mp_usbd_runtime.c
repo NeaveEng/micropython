@@ -56,10 +56,12 @@ typedef struct {
     mp_obj_t descriptor_device_cb;
     mp_obj_t descriptor_config_cb;
     mp_obj_t descriptor_string_cb;
-    mp_obj_t open_cb;
+    mp_obj_t open_itf_cb;
     mp_obj_t reset_cb;
     mp_obj_t control_xfer_cb;
     mp_obj_t xfer_cb;
+
+    bool static_drivers; // Are static TinyUSB drivers also active?
 
     bool reenumerate; // Pending re-enumerate request
 
@@ -138,7 +140,7 @@ STATIC mp_obj_t usbd_make_new(const mp_obj_type_t *type, size_t n_args, size_t n
         o->descriptor_device_cb = mp_const_none;
         o->descriptor_config_cb = mp_const_none;
         o->descriptor_string_cb = mp_const_none;
-        o->open_cb = mp_const_none;
+        o->open_itf_cb = mp_const_none;
         o->reset_cb = mp_const_none;
         o->control_xfer_cb = mp_const_none;
         o->xfer_cb = mp_const_none;
@@ -146,6 +148,7 @@ STATIC mp_obj_t usbd_make_new(const mp_obj_type_t *type, size_t n_args, size_t n
             o->xfer_data[i][0] = mp_const_none;
             o->xfer_data[i][1] = mp_const_none;
         }
+        o->static_drivers = false;
         o->reenumerate = false;
         o->control_data = MP_OBJ_TO_PTR(mp_obj_new_memoryview('B', 0, NULL));
         o->num_pend_excs = 0;
@@ -180,7 +183,7 @@ void mp_usbd_deinit(void) {
     usbd->control_data = NULL;
 
     // We don't reenumerate at this point as the usbd device is gone. TinyUSB
-    // may still send callbacks for the "dynamic" USB endpoints but they will be
+    // may still send callbacks for the "runtime" USB endpoints but they will be
     // rejected until usbd is created again.
 }
 
@@ -264,13 +267,13 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbd_stall_obj, 2, 3, usbd_stall);
 STATIC mp_obj_t usbd_init(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     mp_obj_usbd_t *self = (mp_obj_usbd_t *)MP_OBJ_TO_PTR(pos_args[0]);
 
-    enum { ARG_descriptor_device_cb, ARG_descriptor_config_cb, ARG_descriptor_string_cb, ARG_open_cb,
+    enum { ARG_descriptor_device_cb, ARG_descriptor_config_cb, ARG_descriptor_string_cb, ARG_open_itf_cb,
            ARG_reset_cb, ARG_control_xfer_cb, ARG_xfer_cb };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_descriptor_device_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_descriptor_config_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_descriptor_string_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
-        { MP_QSTR_open_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_open_itf_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_reset_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_control_xfer_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
         { MP_QSTR_xfer_cb, MP_ARG_OBJ, {.u_obj = mp_const_none} },
@@ -281,7 +284,7 @@ STATIC mp_obj_t usbd_init(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     self->descriptor_device_cb = args[ARG_descriptor_device_cb].u_obj;
     self->descriptor_config_cb = args[ARG_descriptor_config_cb].u_obj;
     self->descriptor_string_cb = args[ARG_descriptor_string_cb].u_obj;
-    self->open_cb = args[ARG_open_cb].u_obj;
+    self->open_itf_cb = args[ARG_open_itf_cb].u_obj;
     self->reset_cb = args[ARG_reset_cb].u_obj;
     self->control_xfer_cb = args[ARG_control_xfer_cb].u_obj;
     self->xfer_cb = args[ARG_xfer_cb].u_obj;
@@ -289,6 +292,17 @@ STATIC mp_obj_t usbd_init(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(usbd_init_obj, 1, usbd_init);
+
+// Function to activate/deactivate static TinyUSB drivers (if any),
+// or return the current state of static TinyUSB drivers.
+STATIC mp_obj_t usbd_static_active(size_t n_args, const mp_obj_t *args) {
+    mp_obj_usbd_t *self = (mp_obj_usbd_t *)MP_OBJ_TO_PTR(args[0]);
+    if (n_args == 2) {
+        self->static_drivers = mp_obj_is_true(args[1]);
+    }
+    return mp_obj_new_bool(self->static_drivers);
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(usbd_static_active_obj, 1, 2, usbd_static_active);
 
 // usbd_static Python object is a wrapper for the static properties of the USB device
 // (i.e. values used by the C implementation of TinyUSB devices.)
@@ -298,6 +312,7 @@ STATIC const MP_DEFINE_BYTES_OBJ(desc_cfg_obj,
     mp_usbd_desc_cfg_static, USBD_STATIC_DESC_LEN);
 
 STATIC const mp_rom_map_elem_t usbd_static_properties_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&usbd_static_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_itf_max), MP_OBJ_NEW_SMALL_INT(USBD_ITF_STATIC_MAX) },
     { MP_ROM_QSTR(MP_QSTR_ep_max), MP_OBJ_NEW_SMALL_INT(USBD_EP_STATIC_MAX) },
     { MP_ROM_QSTR(MP_QSTR_str_max), MP_OBJ_NEW_SMALL_INT(USBD_STR_STATIC_MAX) },
@@ -421,19 +436,27 @@ STATIC void runtime_dev_reset(uint8_t rhport) {
 
 STATIC uint16_t runtime_dev_open(uint8_t rhport, tusb_desc_interface_t const *itf_desc, uint16_t max_len) {
     mp_obj_usbd_t *usbd = MP_OBJ_TO_PTR(MP_STATE_VM(usbd));
-    const uint8_t *p_desc = (const void *)itf_desc;
-    uint16_t claim_len = 0;
 
+    // Runtime USB isn't initialised
     if (!usbd) {
         return 0;
     }
 
-    // Claim any interfaces (and associated descriptor data) that aren't in the interface number range reserved for
-    // static drivers.
-    while (claim_len < max_len && (tu_desc_type(p_desc) != TUSB_DESC_INTERFACE ||
-                                   ((tusb_desc_interface_t *)p_desc)->bInterfaceNumber >= USBD_ITF_STATIC_MAX)) {
+    // If the static TinyUSB drivers are also enabled, don't try to claim any
+    // interface in the range reserved for them ("application" drivers
+    // like this one are called first, so they can override.)
+    if (usbd->static_drivers && itf_desc->bInterfaceNumber < USBD_ITF_STATIC_MAX) {
+        return 0;
+    }
+
+    // We're claiming this interface!
+
+    const uint8_t *p_desc = (const void *)(itf_desc + 1); // Points after itf_desc
+    uint16_t claim_len = tu_desc_len(itf_desc);
+
+    while (claim_len < max_len && tu_desc_type(p_desc) != TUSB_DESC_INTERFACE) {
+        // Open all the endpoints found in the descriptor
         if (tu_desc_type(p_desc) == TUSB_DESC_ENDPOINT) {
-            // Open all the endpoints found in the descriptor
             bool r = usbd_edpt_open(USBD_RHPORT, (const void *)p_desc);
             if (!r) {
                 mp_obj_t exc = mp_obj_new_exception_arg1(&mp_type_OSError, MP_OBJ_NEW_SMALL_INT(MP_ENODEV));
@@ -442,16 +465,17 @@ STATIC uint16_t runtime_dev_open(uint8_t rhport, tusb_desc_interface_t const *it
             }
         }
 
+        assert(tu_desc_len(p_desc)); // zero-length descriptor is invalid
         claim_len += tu_desc_len(p_desc);
         p_desc += tu_desc_len(p_desc);
     }
 
-    if (claim_len && mp_obj_is_callable(usbd->open_cb)) {
+    if (claim_len && mp_obj_is_callable(usbd->open_itf_cb)) {
         // Repurpose the control_data memoryview to point into itf_desc for this one call
         usbd->control_data->items = (void *)itf_desc;
         usbd->control_data->len = claim_len;
         mp_obj_t args[] = { MP_OBJ_FROM_PTR(usbd->control_data) };
-        usbd_callback_function_n(usbd->open_cb, 1, args);
+        usbd_callback_function_n(usbd->open_itf_cb, 1, args);
         usbd->control_data->len = 0;
         usbd->control_data->items = NULL;
     }
