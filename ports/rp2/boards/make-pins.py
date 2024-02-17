@@ -67,10 +67,85 @@ class Rp2Pin(boardgen.Pin):
             af_fn = "{:s}{:d}".format(af_fn, af_unit)
         self._afs.append((af_idx + 1, af_fn, af_unit, af))
 
-    # This will be called at the start of the output (after the prefix). Use
-    # it to emit the af objects (via the AF() macro in rp2_prefix.c).
-    def print_source(self, out_source):
-        if self._index is not None:
+    def pin(self):
+        return self._pin
+
+    def name(self):
+        return self._name
+
+
+class Pins(object):
+    def __init__(self):
+        self.cpu_pins = []  # list of NamedPin objects
+        self.board_pins = []  # list of NamedPin objects
+        self.ext_pins = []  # list of NamedPin objects
+        for i in range(0, 32):
+            self.ext_pins.append(NamedPin("EXT_GPIO{:d}".format(i), Pin(i, True)))
+
+    def find_pin(self, pin_name):
+        for pin in self.cpu_pins:
+            if pin.name() == pin_name:
+                return pin.pin()
+
+        for pin in self.ext_pins:
+            if pin.name() == pin_name:
+                return pin.pin()
+
+    def parse_af_file(self, filename, pinname_col, af_col):
+        with open(filename, "r") as csvfile:
+            rows = csv.reader(csvfile)
+            for row in rows:
+                try:
+                    pin_num = parse_pin(row[pinname_col])
+                except Exception:
+                    # import traceback; traceback.print_exc()
+                    continue
+                pin = Pin(pin_num)
+                for af_idx in range(af_col, len(row)):
+                    if af_idx >= af_col:
+                        pin.parse_af(af_idx, row[af_idx])
+                self.cpu_pins.append(NamedPin(pin.cpu_pin_name(), pin))
+
+    def parse_board_file(self, filename):
+        with open(filename, "r") as csvfile:
+            rows = csv.reader(csvfile)
+            for row in rows:
+                if len(row) == 0 or row[0].startswith("#"):
+                    # Skip empty lines, and lines starting with "#"
+                    continue
+                if len(row) != 2:
+                    raise ValueError("Expecting two entries in a row")
+
+                cpu_pin_name = row[1]
+                try:
+                    parse_pin(cpu_pin_name)
+                except:
+                    # import traceback; traceback.print_exc()
+                    continue
+                pin = self.find_pin(cpu_pin_name)
+                if pin:
+                    pin.set_is_board_pin()
+                    if row[0]:  # Only add board pins that have a name
+                        self.board_pins.append(NamedPin(row[0], pin))
+
+    def print_table(self, label, named_pins):
+        print("")
+        print("const machine_pin_obj_t *machine_pin_{:s}_pins[] = {{".format(label))
+        for pin in named_pins:
+            if not pin.pin().is_ext:
+                print("    &pin_{},".format(pin.name()))
+        print("};")
+        print("")
+
+    def print_named(self, label, named_pins):
+        print("")
+        print(
+            "STATIC const mp_rom_map_elem_t pin_{:s}_pins_locals_dict_table[] = {{".format(label)
+        )
+        for named_pin in named_pins:
+            pin = named_pin.pin()
+            if pin.is_ext:
+                print("  #if (MICROPY_HW_PIN_EXT_COUNT > {:d})".format(pin.pin))
             print(
                 "const machine_pin_af_obj_t pin_GPIO{:d}_af[] = {{".format(self.index()),
                 file=out_source,
