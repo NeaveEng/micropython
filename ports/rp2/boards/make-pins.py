@@ -67,12 +67,6 @@ class Rp2Pin(boardgen.Pin):
             af_fn = "{:s}{:d}".format(af_fn, af_unit)
         self._afs.append((af_idx + 1, af_fn, af_unit, af))
 
-    def pin(self):
-        return self._pin
-
-    def name(self):
-        return self._name
-
 
 class Pins(object):
     def __init__(self):
