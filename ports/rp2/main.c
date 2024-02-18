@@ -151,7 +151,6 @@ int main(int argc, char **argv) {
 
     // Hook for setting up anything that can wait until after other hardware features are initialised
     MICROPY_BOARD_EARLY_INIT();
-    
     bool run_main = true;
     for (;;) {
 
