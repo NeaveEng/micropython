@@ -41,6 +41,7 @@ extern pyexec_mode_kind_t pyexec_mode_kind;
 extern int pyexec_system_exit;
 
 #define PYEXEC_FORCED_EXIT (0x100)
+#define PYEXEC_SKIP_USER_CODE (0x200)
 
 int pyexec_raw_repl(void);
 int pyexec_friendly_repl(void);

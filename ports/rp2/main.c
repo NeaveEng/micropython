@@ -151,7 +151,8 @@ int main(int argc, char **argv) {
 
     // Hook for setting up anything that can wait until after other hardware features are initialised
     MICROPY_BOARD_EARLY_INIT();
-
+    
+    bool run_main = true;
     for (;;) {
 
         // Initialise MicroPython runtime.
@@ -185,25 +186,34 @@ int main(int argc, char **argv) {
         pyexec_frozen_module("_boot.py", false);
         #endif
 
-        // Execute user scripts.
-        int ret = pyexec_file_if_exists("boot.py");
-        if (ret & PYEXEC_FORCED_EXIT) {
-            goto soft_reset_exit;
-        }
-        if (pyexec_mode_kind == PYEXEC_MODE_FRIENDLY_REPL && ret != 0) {
-            ret = pyexec_file_if_exists("main.py");
+        if (run_main) {
+            // Execute user scripts.
+            int ret = pyexec_file_if_exists("boot.py");
             if (ret & PYEXEC_FORCED_EXIT) {
+                run_main = !(ret & PYEXEC_SKIP_USER_CODE);
                 goto soft_reset_exit;
             }
+            if (pyexec_mode_kind == PYEXEC_MODE_FRIENDLY_REPL) {
+                ret = pyexec_file_if_exists("main.py");
+                if (ret & PYEXEC_FORCED_EXIT) {
+                    run_main = !(ret & PYEXEC_SKIP_USER_CODE);
+                    goto soft_reset_exit;
+                }
+            }
         }
+        run_main = true;
 
         for (;;) {
             if (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL) {
-                if (pyexec_raw_repl() != 0) {
+                int ret = pyexec_raw_repl();
+                if (ret != 0) {
+                    run_main = !(ret & PYEXEC_SKIP_USER_CODE);
                     break;
                 }
             } else {
-                if (pyexec_friendly_repl() != 0) {
+                int ret = pyexec_friendly_repl();
+                if (ret != 0) {
+                    run_main = !(ret & PYEXEC_SKIP_USER_CODE);
                     break;
                 }
             }

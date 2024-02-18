@@ -322,6 +322,25 @@ target_include_directories(${MICROPY_TARGET} PRIVATE
     ${MICROPY_DIR}/shared/tinyusb/
 )
 
+if (MICROPY_TCA9555_DIR)
+    target_compile_definitions(${MICROPY_TARGET} PRIVATE
+        MICROPY_PY_TCA9555=1
+        MICROPY_HW_PIN_EXT_COUNT=32
+    )
+
+    list(APPEND MICROPY_SOURCE_PORT
+        ${MICROPY_TCA9555_DIR}/machine_pin_tca9555.c
+    )
+
+    list(APPEND MICROPY_SOURCE_DRIVERS
+        ${MICROPY_TCA9555_DIR}/tca9555.c
+    )
+
+    target_include_directories(${MICROPY_TARGET} PRIVATE
+        ${MICROPY_TCA9555_DIR}
+    )
+endif()
+
 if (MICROPY_PY_NETWORK_CYW43)
     string(CONCAT GIT_SUBMODULES "${GIT_SUBMODULES} " lib/cyw43-driver)
     if((NOT (${ECHO_SUBMODULES})) AND NOT EXISTS ${MICROPY_DIR}/lib/cyw43-driver/src/cyw43.h)
@@ -457,6 +476,16 @@ target_link_options(${MICROPY_TARGET} PRIVATE
     -Wl,--wrap=dcd_event_handler
 )
 
+# Do not include stack unwinding & exception handling for C++ user modules
+target_compile_definitions(usermod INTERFACE PICO_CXX_ENABLE_EXCEPTIONS=0)
+target_compile_options(usermod INTERFACE $<$<COMPILE_LANGUAGE:CXX>:
+    -fno-exceptions
+    -fno-unwind-tables
+    -fno-rtti
+    -fno-use-cxa-atexit
+>)
+target_link_options(usermod INTERFACE -specs=nano.specs)
+
 set_source_files_properties(
     ${PICO_SDK_PATH}/src/rp2_common/pico_double/double_math.c
     ${PICO_SDK_PATH}/src/rp2_common/pico_float/float_math.c
@@ -537,6 +566,11 @@ endif()
 target_sources(${MICROPY_TARGET} PRIVATE
     ${GEN_PINS_HDR}
 )
+
+# Temporary hack to get build finding correct CSV file
+pico_find_in_paths(GEN_PINS_BOARD_CSV PICO_BOARD_HEADER_DIRS pins.csv)
+message(WARNING "${GEN_PINS_BOARD_CSV}")
+set(GEN_PINS_CSV_ARG --board "${GEN_PINS_BOARD_CSV}")
 
 # Generate pins
 add_custom_command(
